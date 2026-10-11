@@ -10,16 +10,30 @@ Thunder: pick a vehicle, choose its loadout, targets, map and weather, press
 
 ## Status
 
-The app builds as a universal (Apple Silicon + Intel) `.dmg`. The UI is the
-shipped 3.0.0-alpha.21.1 frontend, unmodified, so every screen, all 12
-languages and all 3,302 vehicles are the ones from the Windows release. The
-backend is a new macOS implementation.
+Builds as a universal (Apple Silicon + Intel) `.dmg`. The UI is the shipped
+3.0.0-alpha.21.1 frontend, unmodified, so every screen, all 12 languages and
+all 3,302 vehicles are the ones from the Windows release. The backend is a
+new macOS implementation.
 
-**It has not been run against War Thunder on a real Mac yet.** The backend
-compiles clean and its logic is unit-tested, but the one thing no amount of
-static work can settle is how the game's own folder is laid out on macOS. See
-[docs/PORTING.md](docs/PORTING.md) for exactly what is verified, what is
-inferred, and what to test first.
+**Ground test drives are confirmed working end to end on macOS**: Apply
+writes the mission, the game lists it under `campaigns/Ask3lad /
+chapters/TestDrive`, the custom level loads, and the user vehicle spawns.
+Reading packed game data out of the `.vromfs.bin` archives works, as does
+the database validation against the installed game version.
+
+Not yet confirmed: air, naval and helicopter test drives. Their missions are
+generated and listed in game, but they also need the per-vehicle files that
+a completed Apply writes.
+
+Two things remain outstanding, both documented in
+[docs/PORTING.md](docs/PORTING.md):
+
+- **Writing into the game folder needs setup**, because War Thunder lives
+  inside an app bundle and macOS restricts writes there. See the one-time
+  setup below.
+- **No Developer ID signature.** This is what stops the app being
+  distributable: Gatekeeper warns on every download, and the App Management
+  permission the app needs does not persist for an ad-hoc signed build.
 
 ## Install
 

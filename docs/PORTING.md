@@ -105,7 +105,28 @@ macOS can also ship a game inside an `.app`, so `resolve_wt_dir` accepts either
 a bundle or its `Contents/Resources` and returns whichever actually holds the
 data.
 
-## Verified
+## Verified in game
+
+Ground test drive, on a real macOS install (macOS 26.7, Apple Silicon, War
+Thunder from the Gaijin launcher):
+
+- the app finds the game nested in `WarThunderLauncher.app`
+- it reads and decodes packed game data from `aces.vromfs.bin`
+- Apply writes the mission, the user vehicle and the weapon files
+- War Thunder lists all four missions under `campaigns/Ask3lad /
+  chapters/TestDrive`
+- the ground mission loads, on the custom level, with the custom vehicle
+
+The backslash question recorded earlier is settled by this: the engine
+normalises the `levels\\...` separators in the level files on macOS, so the
+author's `.blk` files were right to leave untouched.
+
+Air and naval levels carry no terrain by design -- only
+`Ask3lad_Testdrive.bin` exists, and the engine pairs `.bin` to `.blk` by
+filename -- so open water there is expected. What populates them comes from
+the mission's own unit files.
+
+## Verified by tests
 
 - Backend compiles clean: no errors, no warnings, `clippy -D warnings` clean.
 - 19 unit tests pass, covering path-traversal refusal (`..`, absolute paths,
