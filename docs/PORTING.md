@@ -172,3 +172,20 @@ data.
   the macOS icon is upscaled from 48 px and will look soft on a Retina display.
   Drop a 1024×1024 master at `src-tauri/icons/icon.png` and re-run
   `cargo tauri icon` to fix it properly.
+
+## The CSP mistake
+
+Worth recording, because it cost several build cycles. The Windows build's
+`tauri.conf.json` is not recoverable from a compiled binary, so the content
+security policy here was invented rather than replicated. The policy allowed
+`td3file:` under `img-src` and `media-src` but not under `connect-src`, so
+every `fetch()` of a `td3file://` URL was blocked -- including the vehicle
+database the UI loads when a vehicle is selected. The symptom was a blank
+window with no error on the Rust side, because the failure was a CSP
+violation inside the webview.
+
+The CSP is now unset (Tauri's default). Re-introducing one is fine, but it
+has to be derived from what the frontend actually requests, with the webview
+console open to catch violations -- not written from first principles and
+shipped. At minimum it needs `td3file:` in `connect-src` as well as
+`img-src` and `media-src`.
