@@ -241,9 +241,20 @@ fn install_missing(wt: String, files: Vec<Change>) -> R<Vec<String>> {
     apply::install_missing(&dir, &files).map_err(e)
 }
 
-/// Copy the bundled test-drive map and mission templates into the game folder.
+/// Install the bundled test-drive level into the game folder.
 ///
-/// With `repair` set, existing files are overwritten -- this is the
+/// Everything in the bundled `maps` resource is level data and belongs in
+/// `content/pkg_local/levels`: the terrain (`.bin`), the minimap (`.png`) and
+/// the three level definitions (`.blk` -- ground, air and naval, carrying
+/// `mapCoord`, `z_far` and `levelMaxAlt`).
+///
+/// Missions are not installed from here. The frontend generates them and
+/// writes them itself through `install_missing`/`apply_changes`, into
+/// `UserMissions/Ask3lad/ask3lad_testdrive*.blk`. Routing the level `.blk`
+/// files to `UserMissions` instead left the game with a level it could not
+/// find and the app reporting the air test drive as not installed.
+///
+/// With `repair` set, existing files are overwritten -- the
 /// "Repair Map and Missions" action.
 #[tauri::command]
 fn install_map(app: AppHandle, wt: String, repair: bool) -> R<Vec<String>> {
@@ -254,24 +265,17 @@ fn install_map(app: AppHandle, wt: String, repair: bool) -> R<Vec<String>> {
         .resolve("maps", tauri::path::BaseDirectory::Resource)
         .map_err(e)?;
     let levels = wt::levels_dir(&dir);
-    let missions = wt::user_missions(&dir);
     std::fs::create_dir_all(&levels).map_err(e)?;
-    std::fs::create_dir_all(&missions).map_err(e)?;
+    // UserMissions must exist for the frontend to write missions into.
+    std::fs::create_dir_all(wt::user_missions(&dir)).map_err(e)?;
 
     let mut installed = Vec::new();
     for entry in std::fs::read_dir(&src).map_err(e)?.flatten() {
+        if !entry.path().is_file() {
+            continue;
+        }
         let name = entry.file_name().to_string_lossy().to_string();
-        let ext = Path::new(&name)
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("");
-        // Map payloads go to content/pkg_local/levels, missions to UserMissions.
-        let dest_dir = if matches!(ext, "bin" | "png") {
-            &levels
-        } else {
-            &missions
-        };
-        let dest = dest_dir.join(&name);
+        let dest = levels.join(&name);
         if repair || !dest.exists() {
             copy_contents(&entry.path(), &dest)
                 .map_err(|err| e(format!("copying {name} to {}: {err}", dest.display())))?;
