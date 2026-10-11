@@ -187,9 +187,12 @@ fn read_game_files(state: State<AppState>, wt: String, paths: Vec<String>) -> Ve
 /// Flight model for a given aircraft id, from `gamedata/flightmodels`.
 #[tauri::command]
 fn read_flight_model(state: State<AppState>, wt: String, id: String) -> Option<String> {
+    // Both layouts appear in practice, and the vromf lookup lowercases for us.
     [
         format!("gamedata/flightmodels/fm/{id}.blk"),
         format!("gamedata/flightmodels/{id}.blk"),
+        format!("gameData/flightModels/fm/{id}.blk"),
+        format!("gameData/flightModels/{id}.blk"),
     ]
     .iter()
     .find_map(|rel| read_from_game(&state, &wt, rel))

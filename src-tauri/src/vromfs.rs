@@ -54,8 +54,20 @@ impl VromfCache {
     /// Read `rel` from the archives under `game_dir`, as BLK text.
     ///
     /// Returns `None` when no archive holds that path.
+    ///
+    /// Paths are tried as given and then lowercased. Dagor stores vromf
+    /// entries in lower case, while the vehicle database refers to them in
+    /// mixed case (`gameData/Weapons/...`), and `unpack_one` compares paths
+    /// byte for byte -- so case matters inside an archive even though macOS's
+    /// filesystem ignores it. The Windows build looks these up in lower case
+    /// for the same reason.
     pub fn read(&self, game_dir: &Path, rel: &str) -> Option<String> {
-        let wanted = Path::new(rel);
+        let lowered = rel.to_lowercase();
+        let mut candidates: Vec<&str> = vec![rel];
+        if lowered != rel {
+            candidates.push(&lowered);
+        }
+
         for name in ARCHIVES {
             let archive = game_dir.join(name);
             if !archive.is_file() {
@@ -64,23 +76,26 @@ impl VromfCache {
             let Some(unpacker) = self.unpacker(&archive) else {
                 continue;
             };
-            match unpacker.unpack_one(
-                wanted,
-                Some(BlkOutputFormat::BlkText),
-                true,
-                FileFilter::All,
-            ) {
-                Ok(file) => match String::from_utf8(file.buf().to_vec()) {
-                    Ok(text) => return Some(text),
-                    Err(err) => {
-                        eprintln!("[testdrive3] {rel} in {name} is not utf-8: {err}");
-                    }
-                },
-                // Not in this archive: try the next one. Only a genuine decode
-                // failure is worth reporting.
-                Err(_) => continue,
+            for cand in &candidates {
+                let wanted = Path::new(cand);
+                match unpacker.unpack_one(
+                    wanted,
+                    Some(BlkOutputFormat::BlkText),
+                    true,
+                    FileFilter::All,
+                ) {
+                    Ok(file) => match String::from_utf8(file.buf().to_vec()) {
+                        Ok(text) => return Some(text),
+                        Err(err) => {
+                            eprintln!("[testdrive3] {cand} in {name} is not utf-8: {err}");
+                        }
+                    },
+                    // Not in this archive under this spelling: try the next.
+                    Err(_) => continue,
+                }
             }
         }
+        eprintln!("[testdrive3] not found in any vromf: {rel}");
         None
     }
 }
