@@ -1,5 +1,11 @@
 //! Ask3lad Test Drive 3.0 - macOS backend.
 //!
+//! The auto-updater plugin is deliberately NOT registered: it errors during
+//! plugin init when `plugins.updater` is absent from tauri.conf.json, which
+//! aborts startup. Enabling updates means adding both the config block (with
+//! your own minisign key) and the plugin registration together -- see
+//! docs/PORTING.md.
+//!
 //! The frontend is the one shipped in the Windows 3.0.0-alpha.21.1 release,
 //! unmodified. It is already platform-aware: it picks the `td3file://localhost/`
 //! custom-scheme form on non-Windows and chooses its path separator from the
@@ -336,7 +342,6 @@ fn download_new_pictures() -> R<()> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
@@ -397,7 +402,12 @@ pub fn run() {
             download_new_pictures,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Test Drive 3");
+        // Report why startup failed instead of aborting: `panic = "abort"`
+        // turns a panic here into a bare SIGABRT crash with no explanation.
+        .unwrap_or_else(|err| {
+            eprintln!("Test Drive 3 failed to start: {err}");
+            std::process::exit(1);
+        });
 }
 
 /// Resolve a `td3file://` request to bytes.

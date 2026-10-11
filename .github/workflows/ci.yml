@@ -25,6 +25,28 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
+      # Catch startup panics (bad plugin/config wiring) before a Mac build.
+      # A release .dmg can bundle fine and still abort on launch.
+      - name: Smoke test - app survives startup
+        working-directory: src-tauri
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y xvfb
+          cargo build
+          export DISPLAY=:99 WEBKIT_DISABLE_COMPOSITING_MODE=1
+          Xvfb :99 -screen 0 1280x900x24 >/dev/null 2>&1 &
+          sleep 3
+          ./target/debug/ask3lad-testdrive3 > app.log 2>&1 &
+          APP=$!
+          for i in $(seq 1 15); do
+            sleep 1
+            if ! kill -0 $APP 2>/dev/null; then
+              echo "::error::App exited during startup"; cat app.log; exit 1
+            fi
+          done
+          echo "App survived 15s of startup"
+          kill $APP || true
+
       - name: Clippy
         working-directory: src-tauri
         run: cargo clippy --all-targets -- -D warnings

@@ -156,14 +156,18 @@ data.
 - **Code signing and notarisation.** Needs an Apple Developer certificate.
   Without it Gatekeeper blocks first launch; the README documents the
   `xattr -dr com.apple.quarantine` workaround.
-- **Updater signing key.** `tauri-plugin-updater` is registered so the
-  frontend's update button does not break, but no `plugins.updater` config is
-  set, so `check()` returns an error. Updater artifact generation is therefore
-  off as well: `createUpdaterArtifacts` cannot be enabled without a
-  `plugins.updater` block, and turning it on without one fails the bundler with
-  `plugins > updater doesn't exist`. To enable updates, add both at once -- a
-  `plugins.updater` section with your endpoint and minisign public key, and
-  `"createUpdaterArtifacts": true`.
+- **Auto-updater.** The plugin is **not** registered. Registering it while
+  `plugins.updater` is absent from `tauri.conf.json` makes plugin init fail,
+  which aborts the app one second into startup with
+  `invalid type: null, expected struct Config` -- a bare SIGABRT on macOS.
+  The same missing config also fails the bundler. To enable updates, add both
+  together: a `plugins.updater` block with your endpoint and minisign public
+  key, `"createUpdaterArtifacts": true`, and the
+  `tauri_plugin_updater::Builder::new().build()` plugin line in
+  `src-tauri/src/lib.rs`. The frontend's update button errors until then.
+  CI now runs a headless smoke test that catches this class of startup
+  failure, since a bundle can build correctly and still abort on launch.
+
 - **Icon resolution.** The Windows executable only carries 16/32/48 px icons, so
   the macOS icon is upscaled from 48 px and will look soft on a Retina display.
   Drop a 1024×1024 master at `src-tauri/icons/icon.png` and re-run
