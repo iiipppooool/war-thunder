@@ -23,6 +23,23 @@ pub const ARCHIVES: &[&str] = &[
     "wwdata.vromfs.bin",
 ];
 
+/// Whether to apply BLK `override:` blocks when decoding.
+///
+/// Override blocks change the decoded content, so this must match however the
+/// vehicle database was generated -- otherwise weapon stations read from the
+/// game disagree with the database and the app reports the installed game as
+/// missing weapons it actually has.
+///
+/// Defaults to true. Set `TD3_BLK_OVERRIDES=0` to decode without them, which
+/// is the knob to try if the app wrongly claims your War Thunder version
+/// lacks a weapon or station.
+fn apply_overrides() -> bool {
+    !matches!(
+        std::env::var("TD3_BLK_OVERRIDES").as_deref(),
+        Ok("0") | Ok("false") | Ok("no")
+    )
+}
+
 #[derive(Default)]
 pub struct VromfCache {
     /// Archive path -> unpacker. `None` records an archive that failed to
@@ -81,7 +98,7 @@ impl VromfCache {
                 match unpacker.unpack_one(
                     wanted,
                     Some(BlkOutputFormat::BlkText),
-                    true,
+                    apply_overrides(),
                     FileFilter::All,
                 ) {
                     Ok(file) => match String::from_utf8(file.buf().to_vec()) {

@@ -529,6 +529,10 @@ pub fn run() {
             log::init(&data_dir);
             tdlog!("data dir: {}", data_dir.display());
             tdlog!("resources: {}", resource_dir.display());
+            tdlog!(
+                "blk overrides: {} (set TD3_BLK_OVERRIDES=0 to disable)",
+                std::env::var("TD3_BLK_OVERRIDES").unwrap_or_else(|_| "on".into())
+            );
             let backups = store::load_backups(&data_dir);
             app.manage(AppState {
                 data_dir,
