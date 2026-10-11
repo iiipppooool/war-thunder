@@ -370,32 +370,81 @@ fn log_frontend_error(kind: String, message: String) {
 }
 
 /// Installed on every page load; see [`log_frontend_error`].
+///
+/// Serialises `Error` objects properly (a bare `JSON.stringify(err)` yields
+/// `{}`, which threw away the first real error) and wraps the IPC layer so
+/// every command call, result and rejection is named. A `null` arriving where
+/// the frontend expects an array or string is otherwise invisible.
 const ERROR_REPORTER: &str = r#"
 (function () {
   if (window.__td3_reporter) return;
   window.__td3_reporter = true;
+
+  function fmt(x) {
+    if (x instanceof Error) {
+      return (x.name || 'Error') + ': ' + (x.message || '') +
+             (x.stack ? '\n' + x.stack : '');
+    }
+    if (typeof x === 'string') return x;
+    if (x === null) return 'null';
+    if (x === undefined) return 'undefined';
+    try {
+      var j = JSON.stringify(x);
+      // An Error-like object stringifies to {}; dig out its fields instead.
+      if (j === '{}' && (x.message || x.stack)) {
+        return (x.name || 'Error') + ': ' + (x.message || '') +
+               (x.stack ? '\n' + x.stack : '');
+      }
+      return j;
+    } catch (_) { return String(x); }
+  }
+
   function send(kind, msg) {
     try {
-      window.__TAURI_INTERNALS__.invoke('log_frontend_error',
+      window.__TAURI_INTERNALS__.__td3_raw_invoke('log_frontend_error',
         { kind: String(kind), message: String(msg).slice(0, 4000) });
     } catch (_) {}
   }
+
   window.addEventListener('error', function (e) {
-    send('error', (e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0));
+    send('error', fmt(e.error || e.message) + ' @ ' + (e.filename || '') +
+                  ':' + (e.lineno || 0) + ':' + (e.colno || 0));
   });
   window.addEventListener('unhandledrejection', function (e) {
-    var r = e.reason;
-    send('unhandledrejection', (r && (r.stack || r.message)) || r);
+    send('unhandledrejection', fmt(e.reason));
   });
   var ce = console.error;
   console.error = function () {
-    var a = Array.prototype.slice.call(arguments).map(function (x) {
-      try { return typeof x === 'string' ? x : JSON.stringify(x); } catch (_) { return String(x); }
-    });
-    send('console.error', a.join(' '));
+    send('console.error',
+      Array.prototype.slice.call(arguments).map(fmt).join(' '));
     ce.apply(console, arguments);
   };
-  send('ready', 'error reporter installed');
+
+  // Wrap invoke so the command that returns the unexpected value is named.
+  var internals = window.__TAURI_INTERNALS__;
+  if (internals && internals.invoke && !internals.__td3_raw_invoke) {
+    internals.__td3_raw_invoke = internals.invoke.bind(internals);
+    internals.invoke = function (cmd, args, opts) {
+      var raw = internals.__td3_raw_invoke;
+      if (cmd === 'log_frontend_error') return raw(cmd, args, opts);
+      return raw(cmd, args, opts).then(function (res) {
+        var t = res === null ? 'null'
+              : Array.isArray(res) ? 'array(' + res.length + ')'
+              : typeof res;
+        var note = '';
+        if (res === null) note = '  <-- NULL';
+        if (Array.isArray(res) && res.length && res.every(function (x) { return x === null; })) {
+          note = '  <-- all null (' + res.length + ')';
+        }
+        send('ipc', cmd + ' -> ' + t + note);
+        return res;
+      }, function (err) {
+        send('ipc-reject', cmd + ' !! ' + fmt(err));
+        throw err;
+      });
+    };
+  }
+  send('ready', 'reporter + ipc logger installed');
 })();
 "#;
 
@@ -405,7 +454,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .on_page_load(|window, _| {
-            // Report frontend failures to stderr from the moment the page loads.
+            // Install on both Started and Finished: the guard makes it
+            // idempotent, and running early catches failures during boot.
             if let Err(err) = window.eval(ERROR_REPORTER) {
                 eprintln!("[testdrive3] could not install error reporter: {err}");
             }
