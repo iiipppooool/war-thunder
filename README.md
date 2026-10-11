@@ -39,6 +39,20 @@ It moves `UserMissions` and `content/pkg_local` out to
 `~/My Games/WarThunder/td3`, symlinks them back, keeps `.bak` copies of
 whatever was there, and verifies both are writable. `--undo` reverses it.
 
+### Cleaning up after a pre-#17 build
+
+Builds before #17 wrote the three level definitions into `UserMissions/`
+instead of `content/pkg_local/levels/`, and left diagnostic probe files
+behind. Both confuse the game's mission list. To put it right:
+
+```sh
+./scripts/macos-cleanup.sh
+```
+
+It moves the level files where they belong, removes probes, duplicates and
+empty `.blk` files, then prints the final layout. Backups are listed but kept
+unless you pass `--purge-backups`.
+
 Granting **App Management** in System Settings is the alternative, but macOS
 does not keep that grant for an app without a Developer ID signature, so it
 switches itself off again. See [docs/PORTING.md](docs/PORTING.md).
