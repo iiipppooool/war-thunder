@@ -358,11 +358,58 @@ fn download_new_pictures() -> R<()> {
     download_pictures()
 }
 
+/// Receive a frontend error and print it to stderr.
+///
+/// A webview failure -- a thrown exception, a rejected promise, a CSP
+/// violation -- leaves no trace on the Rust side, so a blank window looks
+/// identical to a hang. Forwarding them makes the app self-diagnosing: run it
+/// from a terminal and the real cause is printed.
+#[tauri::command]
+fn log_frontend_error(kind: String, message: String) {
+    eprintln!("[testdrive3] FRONTEND {kind}: {message}");
+}
+
+/// Installed on every page load; see [`log_frontend_error`].
+const ERROR_REPORTER: &str = r#"
+(function () {
+  if (window.__td3_reporter) return;
+  window.__td3_reporter = true;
+  function send(kind, msg) {
+    try {
+      window.__TAURI_INTERNALS__.invoke('log_frontend_error',
+        { kind: String(kind), message: String(msg).slice(0, 4000) });
+    } catch (_) {}
+  }
+  window.addEventListener('error', function (e) {
+    send('error', (e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e.reason;
+    send('unhandledrejection', (r && (r.stack || r.message)) || r);
+  });
+  var ce = console.error;
+  console.error = function () {
+    var a = Array.prototype.slice.call(arguments).map(function (x) {
+      try { return typeof x === 'string' ? x : JSON.stringify(x); } catch (_) { return String(x); }
+    });
+    send('console.error', a.join(' '));
+    ce.apply(console, arguments);
+  };
+  send('ready', 'error reporter installed');
+})();
+"#;
+
 // ------------------------------------------------------------------- run loop
 
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .on_page_load(|window, _| {
+            // Report frontend failures to stderr from the moment the page loads.
+            if let Err(err) = window.eval(ERROR_REPORTER) {
+                eprintln!("[testdrive3] could not install error reporter: {err}");
+            }
+        })
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
@@ -434,6 +481,7 @@ pub fn run() {
             pictures_missing,
             download_pictures,
             download_new_pictures,
+            log_frontend_error,
         ])
         .run(tauri::generate_context!())
         // Report why startup failed instead of aborting: `panic = "abort"`
