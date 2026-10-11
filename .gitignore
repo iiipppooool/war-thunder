@@ -1,0 +1,10 @@
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/schemas/
+dist-macos/
+
+# macOS
+.DS_Store
+
+# Node (only used for the Tauri CLI)
+node_modules/

@@ -1,0 +1,25 @@
+{
+  "dbVersion": "3.04",
+  "schema": 1,
+  "gameVersion": "2.59.0.46",
+  "gamePatch": "2.59",
+  "built": "2026-10-10T12:06:08Z",
+  "files": {
+    "ground.json": {
+      "count": 1239,
+      "sha256": "1f1b1ef55f76eed0a91efe59349ec69cefe0998b785b1ff5fd638d5a39bb3865"
+    },
+    "air.json": {
+      "count": 1362,
+      "sha256": "b410d370e2512e7bae63ab11263c06c6a5bce0887168606c5d03009e5cedd2c5"
+    },
+    "heli.json": {
+      "count": 113,
+      "sha256": "3eb23567ac94c9ab321136b7d36cd6494d860c036b413d7f00babfbbf170da6d"
+    },
+    "naval.json": {
+      "count": 588,
+      "sha256": "75e4c507f10e033b874d19dacf725a3498dc5fe542e81ad56813964f14d67f0f"
+    }
+  }
+}

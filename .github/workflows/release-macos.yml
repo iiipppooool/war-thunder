@@ -1,0 +1,89 @@
+name: Release (macOS)
+
+# Builds the macOS counterpart of the Windows release. Tag a commit
+# (e.g. v3.0.0-alpha.21.1) or run this manually to produce a universal .dmg.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish as (e.g. v3.0.0-alpha.21.1-mac)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (Intel + Apple Silicon)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.toml') }}
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Run tests
+        working-directory: src-tauri
+        run: cargo test
+
+      # A universal binary runs natively on Apple Silicon and on Intel Macs.
+      - name: Build universal app + dmg
+        working-directory: src-tauri
+        run: cargo tauri build --target universal-apple-darwin --verbose
+
+      - name: Collect artifacts
+        id: collect
+        run: |
+          set -euo pipefail
+          out="dist-macos"
+          mkdir -p "$out"
+          base="src-tauri/target/universal-apple-darwin/release/bundle"
+          find "$base" -name "*.dmg" -exec cp {} "$out/" \;
+          # Zip the .app as well, for users who would rather not mount a dmg.
+          app=$(find "$base/macos" -maxdepth 1 -name "*.app" | head -1)
+          if [ -n "$app" ]; then
+            ditto -c -k --sequesterRsrc --keepParent "$app" "$out/$(basename "$app" .app).app.zip"
+          fi
+          ls -lh "$out"
+          echo "dir=$out" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: testdrive3-macos
+          path: ${{ steps.collect.outputs.dir }}/*
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: Test Drive 3.0 for macOS ${{ github.event.inputs.tag || github.ref_name }}
+          prerelease: true
+          files: ${{ steps.collect.outputs.dir }}/*
+          body: |
+            macOS build of Ask3lad Test Drive 3.0.
+
+            **The app is not code-signed or notarised**, so Gatekeeper will
+            refuse it on first launch. To open it:
+
+            ```sh
+            xattr -dr com.apple.quarantine "/Applications/Ask3lad Test Drive 3.app"
+            ```
+
+            Or right-click the app, choose **Open**, then **Open** again.
+
+            Requires macOS 10.15 or later and War Thunder.
