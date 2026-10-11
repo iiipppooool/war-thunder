@@ -14,6 +14,7 @@
 
 pub mod apply;
 pub mod store;
+pub mod vromfs;
 pub mod wt;
 
 use apply::{Backup, Change};
@@ -41,6 +42,8 @@ pub struct AppState {
     pub resource_dir: PathBuf,
     pub exe_dir: PathBuf,
     pub backups: Mutex<Vec<Backup>>,
+    /// Cached vromf unpackers; game data is packed, not loose.
+    pub vromfs: vromfs::VromfCache,
     pub pictures_running: Mutex<bool>,
 }
 
@@ -133,7 +136,7 @@ fn find_previews(state: State<AppState>) -> Option<String> {
 ///
 /// Paths that escape the game folder are refused (as `None`): reads stay
 /// inside the install, exactly as writes do.
-fn read_from_game(wt_dir: &str, rel: &str) -> Option<String> {
+fn read_from_game(state: &AppState, wt_dir: &str, rel: &str) -> Option<String> {
     let root = Path::new(wt_dir);
     let target = match apply::safe_join(root, rel) {
         Ok(t) => t,
@@ -142,29 +145,37 @@ fn read_from_game(wt_dir: &str, rel: &str) -> Option<String> {
             return None;
         }
     };
-    std::fs::read_to_string(target).ok()
+    // Loose file first (mods and user content), then the packed archives,
+    // which is where the shipped game data actually lives.
+    if let Ok(text) = std::fs::read_to_string(&target) {
+        return Some(text);
+    }
+    state.vromfs.read(root, rel)
 }
 
 #[tauri::command]
-fn read_game_file(wt: String, path: String) -> Option<String> {
-    read_from_game(&wt, &path)
+fn read_game_file(state: State<AppState>, wt: String, path: String) -> Option<String> {
+    read_from_game(&state, &wt, &path)
 }
 
 #[tauri::command]
-fn read_game_files(wt: String, paths: Vec<String>) -> Vec<Option<String>> {
+fn read_game_files(state: State<AppState>, wt: String, paths: Vec<String>) -> Vec<Option<String>> {
     // One unreadable path yields one null, never a failed batch.
-    paths.iter().map(|p| read_from_game(&wt, p)).collect()
+    paths
+        .iter()
+        .map(|p| read_from_game(&state, &wt, p))
+        .collect()
 }
 
 /// Flight model for a given aircraft id, from `gamedata/flightmodels`.
 #[tauri::command]
-fn read_flight_model(wt: String, id: String) -> Option<String> {
+fn read_flight_model(state: State<AppState>, wt: String, id: String) -> Option<String> {
     [
         format!("gamedata/flightmodels/fm/{id}.blk"),
         format!("gamedata/flightmodels/{id}.blk"),
     ]
     .iter()
-    .find_map(|rel| read_from_game(&wt, rel))
+    .find_map(|rel| read_from_game(&state, &wt, rel))
 }
 
 // ------------------------------------------------------------ apply / backups
@@ -477,6 +488,7 @@ pub fn run() {
                 resource_dir,
                 exe_dir,
                 backups: Mutex::new(backups),
+                vromfs: vromfs::VromfCache::new(),
                 pictures_running: Mutex::new(false),
             });
             // TD3_DEVTOOLS=1 opens the inspector at launch, so a frontend

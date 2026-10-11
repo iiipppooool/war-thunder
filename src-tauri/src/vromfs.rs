@@ -1,0 +1,110 @@
+//! Reading game files out of War Thunder's `.vromfs.bin` archives.
+//!
+//! War Thunder ships almost nothing as loose files: `gamedata/flightmodels`,
+//! `gamedata/weapons` and the rest live inside `aces.vromfs.bin` and its
+//! siblings, as binary BLK encoded with zstd. That is true on Windows as well
+//! as macOS -- the Windows build of Test Drive reads them with the `wt_blk`
+//! crate, which is what this module uses, at the same version.
+//!
+//! Opening an archive decodes its whole inner container, which is expensive,
+//! so each unpacker is built once and cached for the lifetime of the app.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use wt_blk::vromf::{BlkOutputFormat, File, FileFilter, VromfUnpacker};
+
+/// Archives to search, in the order most likely to hold `gamedata/`.
+pub const ARCHIVES: &[&str] = &[
+    "aces.vromfs.bin",
+    "char.vromfs.bin",
+    "game.vromfs.bin",
+    "mis.vromfs.bin",
+    "wwdata.vromfs.bin",
+];
+
+#[derive(Default)]
+pub struct VromfCache {
+    /// Archive path -> unpacker. `None` records an archive that failed to
+    /// open, so a broken or absent file is not retried on every read.
+    open: Mutex<HashMap<PathBuf, Option<Arc<VromfUnpacker>>>>,
+}
+
+impl VromfCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn unpacker(&self, archive: &Path) -> Option<Arc<VromfUnpacker>> {
+        let mut open = self.open.lock().ok()?;
+        if let Some(cached) = open.get(archive) {
+            return cached.clone();
+        }
+        let built = File::new(archive)
+            .ok()
+            .and_then(|f| VromfUnpacker::from_file(&f, false).ok())
+            .map(Arc::new);
+        if built.is_none() {
+            eprintln!("[testdrive3] could not open vromf {}", archive.display());
+        }
+        open.insert(archive.to_path_buf(), built.clone());
+        built
+    }
+
+    /// Read `rel` from the archives under `game_dir`, as BLK text.
+    ///
+    /// Returns `None` when no archive holds that path.
+    pub fn read(&self, game_dir: &Path, rel: &str) -> Option<String> {
+        let wanted = Path::new(rel);
+        for name in ARCHIVES {
+            let archive = game_dir.join(name);
+            if !archive.is_file() {
+                continue;
+            }
+            let Some(unpacker) = self.unpacker(&archive) else {
+                continue;
+            };
+            match unpacker.unpack_one(
+                wanted,
+                Some(BlkOutputFormat::BlkText),
+                true,
+                FileFilter::All,
+            ) {
+                Ok(file) => match String::from_utf8(file.buf().to_vec()) {
+                    Ok(text) => return Some(text),
+                    Err(err) => {
+                        eprintln!("[testdrive3] {rel} in {name} is not utf-8: {err}");
+                    }
+                },
+                // Not in this archive: try the next one. Only a genuine decode
+                // failure is worth reporting.
+                Err(_) => continue,
+            }
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_archives_yield_none_without_panicking() {
+        let cache = VromfCache::new();
+        let dir = std::env::temp_dir().join(format!("vromf_none_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(cache.read(&dir, "gamedata/flightmodels/fm/x.blk"), None);
+    }
+
+    #[test]
+    fn a_corrupt_archive_is_not_retried_or_fatal() {
+        let cache = VromfCache::new();
+        let dir = std::env::temp_dir().join(format!("vromf_bad_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("aces.vromfs.bin"), b"not a vromf").unwrap();
+        // Twice, to exercise the negative cache path.
+        assert_eq!(cache.read(&dir, "gamedata/weapons/x.blk"), None);
+        assert_eq!(cache.read(&dir, "gamedata/weapons/x.blk"), None);
+    }
+}
