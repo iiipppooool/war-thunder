@@ -36,6 +36,9 @@ fn e<E: std::fmt::Display>(err: E) -> String {
 
 pub struct AppState {
     pub data_dir: PathBuf,
+    /// The app's bundled resources (database JSON, 512 icons, maps). The
+    /// frontend builds `td3file://` URLs into here, so it must be servable.
+    pub resource_dir: PathBuf,
     pub exe_dir: PathBuf,
     pub backups: Mutex<Vec<Backup>>,
     pub pictures_running: Mutex<bool>,
@@ -367,13 +370,26 @@ pub fn run() {
                 .ok()
                 .and_then(|p| p.parent().map(Path::to_path_buf))
                 .unwrap_or_else(|| data_dir.clone());
+            let resource_dir = app
+                .path()
+                .resolve("", tauri::path::BaseDirectory::Resource)
+                .unwrap_or_else(|_| data_dir.clone());
             let backups = store::load_backups(&data_dir);
             app.manage(AppState {
                 data_dir,
+                resource_dir,
                 exe_dir,
                 backups: Mutex::new(backups),
                 pictures_running: Mutex::new(false),
             });
+            // TD3_DEVTOOLS=1 opens the inspector at launch, so a frontend
+            // error can be read without relying on a right-click menu.
+            if std::env::var_os("TD3_DEVTOOLS").is_some() {
+                use tauri::Manager as _;
+                if let Some(w) = app.get_webview_window("main") {
+                    w.open_devtools();
+                }
+            }
             Ok(())
         })
         // The frontend builds URLs as `td3file://localhost/<urlencoded abs path>`
@@ -432,15 +448,30 @@ pub fn run() {
 ///
 /// Only files under the app data dir or the bundled resources are served, so a
 /// stray URL in the webview cannot read arbitrary disk.
+/// True when `real` sits inside any of `roots`.
+///
+/// Split out from the protocol handler so it can be tested without a running
+/// app: this is the whole security boundary for `td3file://`.
+pub fn path_is_allowed(real: &Path, roots: &[PathBuf]) -> bool {
+    roots.iter().any(|r| {
+        let r = r.canonicalize().unwrap_or_else(|_| r.clone());
+        real.starts_with(&r)
+    })
+}
+
 fn serve_local_file(state: &AppState, raw_path: &str) -> Result<(Vec<u8>, String), u16> {
     let decoded = urlencoding::decode(raw_path.trim_start_matches('/')).map_err(|_| 400u16)?;
     let path = PathBuf::from(decoded.as_ref());
     let real = path.canonicalize().map_err(|_| 404u16)?;
-    let allowed = state
-        .data_dir
-        .canonicalize()
-        .unwrap_or_else(|_| state.data_dir.clone());
-    if !real.starts_with(&allowed) {
+    // The app's own two directories: downloaded/user content in the data dir,
+    // and the bundled database and icons in the resource dir. Serving only the
+    // data dir meant every icon and the vehicle database came back 403.
+    let roots = [state.data_dir.clone(), state.resource_dir.clone()];
+    if !path_is_allowed(&real, &roots) {
+        eprintln!(
+            "[testdrive3] td3file refused (outside app dirs): {}",
+            real.display()
+        );
         return Err(403);
     }
     let bytes = std::fs::read(&real).map_err(|_| 404u16)?;
@@ -448,4 +479,49 @@ fn serve_local_file(state: &AppState, raw_path: &str) -> Result<(Vec<u8>, String
         .first_or_octet_stream()
         .to_string();
     Ok((bytes, mime))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn tmp(name: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("serve_{name}_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&p);
+        fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn serves_from_both_app_directories() {
+        let data = tmp("data");
+        let res = tmp("res");
+        fs::create_dir_all(res.join("database/icons")).unwrap();
+        let icon = res.join("database/icons/ap_tank.png");
+        fs::write(&icon, b"png").unwrap();
+        let bg = data.join("background/background.png");
+        fs::create_dir_all(bg.parent().unwrap()).unwrap();
+        fs::write(&bg, b"png").unwrap();
+
+        let roots = [data.clone(), res.clone()];
+        // A bundled icon must be servable -- serving only the data dir is what
+        // made every icon 403 and broke the vehicle view.
+        assert!(path_is_allowed(&icon.canonicalize().unwrap(), &roots));
+        // So must a user background in the data dir.
+        assert!(path_is_allowed(&bg.canonicalize().unwrap(), &roots));
+    }
+
+    #[test]
+    fn refuses_paths_outside_the_app() {
+        let data = tmp("data2");
+        let res = tmp("res2");
+        let roots = [data, res];
+        for outside in ["/etc/hosts", "/usr/bin/env"] {
+            let p = Path::new(outside);
+            if let Ok(real) = p.canonicalize() {
+                assert!(!path_is_allowed(&real, &roots), "must refuse {outside}");
+            }
+        }
+    }
 }
