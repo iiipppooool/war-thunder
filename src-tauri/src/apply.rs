@@ -55,6 +55,17 @@ pub enum ApplyError {
         path: String,
         source: std::io::Error,
     },
+    /// macOS refuses writes inside another app's bundle unless the app holds
+    /// App Management permission. The bare EPERM gives the user nothing to
+    /// act on, so say what to do about it.
+    #[error(
+        "macOS blocked writing inside War Thunder's app bundle ({path}).\n\n\
+         Open System Settings > Privacy & Security > App Management and switch \
+         on Ask3lad Test Drive 3, then press Apply again.\n\n\
+         (The folder itself is writable -- this is macOS protecting one app \
+         from being modified by another.)"
+    )]
+    AppManagementBlocked { path: String },
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -92,17 +103,26 @@ pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, ApplyError> {
             _ => return Err(esc()),
         }
     }
-    // Defence in depth: if the parent chain already exists, make sure its real
-    // location is still inside root (catches a pre-existing symlink).
-    if let Some(parent) = out.parent() {
-        if let Ok(real_parent) = parent.canonicalize() {
-            let real_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-            if !real_parent.starts_with(&real_root) {
-                return Err(esc());
-            }
-        }
-    }
+    // Deliberately no symlink resolution here. On macOS, writing inside
+    // War Thunder's app bundle is blocked by App Management protection, and
+    // the practical workaround is to symlink UserMissions out to a normal
+    // folder. Resolving symlinks and demanding the target stay under the game
+    // folder would reject exactly that setup.
+    //
+    // Safety does not depend on it: the component loop above accepts only
+    // plain names, so no input can walk out of `root` on its own. A symlink
+    // can only point elsewhere because someone with write access to the game
+    // folder put it there, which is a decision already made outside this app.
     Ok(out)
+}
+
+/// True when `err` is EPERM and `path` is inside a macOS `.app` bundle --
+/// the signature of App Management protection rather than a permissions issue.
+fn is_app_management_block(err: &std::io::Error, path: &Path) -> bool {
+    err.kind() == std::io::ErrorKind::PermissionDenied
+        && path
+            .components()
+            .any(|c| c.as_os_str().to_string_lossy().ends_with(".app"))
 }
 
 fn write_file(target: &Path, contents: &str) -> Result<(), ApplyError> {
@@ -112,9 +132,17 @@ fn write_file(target: &Path, contents: &str) -> Result<(), ApplyError> {
             source: err,
         })?;
     }
-    std::fs::write(target, contents).map_err(|err| ApplyError::Write {
-        path: target.display().to_string(),
-        source: err,
+    std::fs::write(target, contents).map_err(|err| {
+        if is_app_management_block(&err, target) {
+            ApplyError::AppManagementBlocked {
+                path: target.display().to_string(),
+            }
+        } else {
+            ApplyError::Write {
+                path: target.display().to_string(),
+                source: err,
+            }
+        }
     })
 }
 
@@ -226,6 +254,53 @@ mod tests {
             after: after.into(),
             before: None,
         }
+    }
+
+    /// A symlinked UserMissions is the supported way around macOS App
+    /// Management, so a path through one must be accepted.
+    #[test]
+    fn follows_a_symlinked_subdirectory() {
+        let g = game("symlink");
+        let outside = std::env::temp_dir().join(format!("outside_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&outside);
+        fs::create_dir_all(&outside).unwrap();
+        let link = g.join("UserMissions");
+        fs::remove_dir_all(&link).unwrap();
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+        // The write lands in the real directory, through the link.
+        apply(
+            &g,
+            "linked",
+            &[ch("UserMissions/td.blk", "mission")],
+            1,
+            "now".into(),
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(outside.join("td.blk")).unwrap(),
+            "mission"
+        );
+
+        // Traversal is still refused -- the component check, not symlinks,
+        // is what provides that.
+        assert!(safe_join(&g, "UserMissions/../../evil.blk").is_err());
+    }
+
+    #[test]
+    fn eperm_inside_an_app_bundle_is_reported_as_app_management() {
+        let eperm = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let other = std::io::Error::from(std::io::ErrorKind::NotFound);
+        let in_bundle = Path::new(
+            "/Applications/WarThunderLauncher.app/Contents/Resources/game/UserMissions/a.blk",
+        );
+        let outside = Path::new("/Users/me/My Games/WarThunder/UserMissions/a.blk");
+
+        assert!(is_app_management_block(&eperm, in_bundle));
+        // Outside a bundle, EPERM is a plain permissions problem.
+        assert!(!is_app_management_block(&eperm, outside));
+        // And a different error is never reported as a permission prompt.
+        assert!(!is_app_management_block(&other, in_bundle));
     }
 
     #[test]
