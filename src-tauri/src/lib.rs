@@ -13,6 +13,7 @@
 //! commands over macOS paths, plus the `td3file` scheme.
 
 pub mod apply;
+pub mod log;
 pub mod store;
 pub mod vromfs;
 pub mod wt;
@@ -31,7 +32,7 @@ fn e<E: std::fmt::Display>(err: E) -> String {
     // Surface the failure on stderr too: the webview may swallow a rejected
     // command, leaving a blank screen with no visible cause.
     let msg = err.to_string();
-    eprintln!("[testdrive3] command error: {msg}");
+    tdlog!("command error: {msg}");
     msg
 }
 
@@ -171,7 +172,7 @@ fn read_from_game(state: &AppState, wt_dir: &str, rel: &str) -> Option<String> {
     let target = match apply::safe_join(root, rel) {
         Ok(t) => t,
         Err(err) => {
-            eprintln!("[testdrive3] refusing to read {rel:?}: {err}");
+            tdlog!("refusing to read {rel:?}: {err}");
             return None;
         }
     };
@@ -420,7 +421,7 @@ fn download_new_pictures() -> R<()> {
 /// from a terminal and the real cause is printed.
 #[tauri::command]
 fn log_frontend_error(kind: String, message: String) {
-    eprintln!("[testdrive3] FRONTEND {kind}: {message}");
+    tdlog!("FRONTEND {kind}: {message}");
 }
 
 /// Installed on every page load; see [`log_frontend_error`].
@@ -511,7 +512,7 @@ pub fn run() {
             // Install on both Started and Finished: the guard makes it
             // idempotent, and running early catches failures during boot.
             if let Err(err) = window.eval(ERROR_REPORTER) {
-                eprintln!("[testdrive3] could not install error reporter: {err}");
+                tdlog!("could not install error reporter: {err}");
             }
         })
         .setup(|app| {
@@ -525,6 +526,9 @@ pub fn run() {
                 .path()
                 .resolve("", tauri::path::BaseDirectory::Resource)
                 .unwrap_or_else(|_| data_dir.clone());
+            log::init(&data_dir);
+            tdlog!("data dir: {}", data_dir.display());
+            tdlog!("resources: {}", resource_dir.display());
             let backups = store::load_backups(&data_dir);
             app.manage(AppState {
                 data_dir,

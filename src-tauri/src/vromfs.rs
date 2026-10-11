@@ -45,7 +45,7 @@ impl VromfCache {
             .and_then(|f| VromfUnpacker::from_file(&f, false).ok())
             .map(Arc::new);
         if built.is_none() {
-            eprintln!("[testdrive3] could not open vromf {}", archive.display());
+            crate::tdlog!("could not open vromf {}", archive.display());
         }
         open.insert(archive.to_path_buf(), built.clone());
         built
@@ -87,7 +87,7 @@ impl VromfCache {
                     Ok(file) => match String::from_utf8(file.buf().to_vec()) {
                         Ok(text) => return Some(text),
                         Err(err) => {
-                            eprintln!("[testdrive3] {cand} in {name} is not utf-8: {err}");
+                            crate::tdlog!("{cand} in {name} is not utf-8: {err}");
                         }
                     },
                     // Not in this archive under this spelling: try the next.
@@ -97,7 +97,7 @@ impl VromfCache {
         }
         // Only reached for genuine game-data paths now, so this means a
         // real lookup miss rather than a file the app has yet to create.
-        eprintln!("[testdrive3] not in any vromf: {rel}");
+        crate::tdlog!("not in any vromf: {rel}");
         None
     }
 }
