@@ -32,14 +32,28 @@ fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
-/// On macOS a game can ship inside an `.app` bundle, where the payload lives in
-/// `Contents/Resources`. Accept either the bundle or its Resources dir and
-/// always return the directory that actually holds the game data.
+/// Where a game folder can hide relative to a directory the user points at.
+///
+/// On macOS the Gaijin launcher nests the game two bundles deep:
+/// `WarThunderLauncher.app/Contents/WarThunder.app/Contents/Resources/game`,
+/// and that `game` directory is the real analogue of the Windows install root
+/// (it holds `aces.vromfs.bin` and friends). Someone picking the folder by
+/// hand will naturally choose the launcher or the inner app, so accept any
+/// level and resolve down to the directory that actually holds the data.
+const NESTED: &[&str] = &[
+    "Contents/WarThunder.app/Contents/Resources/game",
+    "Contents/Resources/game",
+    "Contents/MacOS/game",
+    "Contents/Resources",
+    "game",
+];
+
+/// Resolve `dir` to the directory that actually holds the game data, or `None`.
 pub fn resolve_wt_dir(dir: &Path) -> Option<PathBuf> {
     if is_wt_dir(dir) {
         return Some(dir.to_path_buf());
     }
-    for inner in ["Contents/Resources", "Contents/Resources/WarThunder"] {
+    for inner in NESTED {
         let c = dir.join(inner);
         if is_wt_dir(&c) {
             return Some(c);
@@ -89,10 +103,13 @@ pub fn candidate_dirs() -> Vec<PathBuf> {
         }
     }
 
-    // Standalone Gaijin launcher installs and plain app-bundle drops.
+    // The Gaijin launcher is the normal macOS install: the game lives inside
+    // its bundle, so the launcher path resolves down via NESTED.
     for p in [
-        "/Applications/War Thunder.app",
+        "/Applications/WarThunderLauncher.app",
+        "/Applications/War Thunder Launcher.app",
         "/Applications/WarThunder.app",
+        "/Applications/War Thunder.app",
         "/Applications/War Thunder",
         "/Applications/WarThunder",
     ] {
@@ -100,6 +117,7 @@ pub fn candidate_dirs() -> Vec<PathBuf> {
     }
     if let Some(h) = &h {
         for p in [
+            "Applications/WarThunderLauncher.app",
             "Applications/War Thunder.app",
             "Applications/WarThunder.app",
             "Library/Application Support/WarThunder",
@@ -141,6 +159,13 @@ pub fn find_installs() -> Vec<PathBuf> {
         }
     }
     out
+}
+
+/// `~/My Games/WarThunder` -- where macOS keeps saves and logs, separate from
+/// the game data inside the app bundle.
+pub fn user_data_dir() -> Option<PathBuf> {
+    let d = home()?.join("My Games/WarThunder");
+    d.is_dir().then_some(d)
 }
 
 /// `<wt>/UserMissions` -- where the game reads custom missions from.
@@ -190,6 +215,45 @@ mod tests {
         assert!(!is_wt_dir(&d));
         // ...but resolving descends into Contents/Resources.
         assert_eq!(resolve_wt_dir(&d).unwrap(), res);
+    }
+
+    /// The real macOS layout, as found on a live install: the game sits two
+    /// app bundles deep inside the Gaijin launcher, and only that inner
+    /// `game` directory holds the vromfs files.
+    #[test]
+    fn resolves_the_real_macos_launcher_layout() {
+        let d = tmp("launcher");
+        let launcher = d.join("WarThunderLauncher.app");
+        let game = launcher.join("Contents/WarThunder.app/Contents/Resources/game");
+        fs::create_dir_all(&game).unwrap();
+        for f in ["aces.vromfs.bin", "gui.vromfs.bin", "lang.vromfs.bin"] {
+            fs::write(game.join(f), b"x").unwrap();
+        }
+
+        // Neither outer level looks like a game folder on its own...
+        assert!(!is_wt_dir(&launcher));
+        assert!(!is_wt_dir(&launcher.join("Contents")));
+        // ...but pointing at the launcher resolves down to the game data,
+        // which is what someone browsing by hand will pick.
+        assert_eq!(resolve_wt_dir(&launcher).unwrap(), game);
+        // Picking the inner app works too.
+        assert_eq!(
+            resolve_wt_dir(&launcher.join("Contents/WarThunder.app")).unwrap(),
+            game
+        );
+        // And the game dir itself is accepted unchanged.
+        assert_eq!(resolve_wt_dir(&game).unwrap(), game);
+    }
+
+    /// `~/My Games/WarThunder` holds only saves and logs -- no game data --
+    /// so it must NOT be mistaken for the install.
+    #[test]
+    fn user_data_dir_is_not_a_game_dir() {
+        let d = tmp("userdata");
+        fs::create_dir_all(d.join("Saves")).unwrap();
+        fs::create_dir_all(d.join("_game_logs")).unwrap();
+        assert!(!is_wt_dir(&d));
+        assert!(resolve_wt_dir(&d).is_none());
     }
 
     #[test]
