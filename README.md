@@ -15,15 +15,17 @@ Builds as a universal (Apple Silicon + Intel) `.dmg`. The UI is the shipped
 all 3,302 vehicles are the ones from the Windows release. The backend is a
 new macOS implementation.
 
-**Ground test drives are confirmed working end to end on macOS**: Apply
-writes the mission, the game lists it under `campaigns/Ask3lad /
-chapters/TestDrive`, the custom level loads, and the user vehicle spawns.
-Reading packed game data out of the `.vromfs.bin` archives works, as does
-the database validation against the installed game version.
+**Ground, naval and air test drives are confirmed working end to end on
+macOS**: Apply writes the mission, the game lists it under
+`campaigns/Ask3lad / chapters/TestDrive`, the custom level loads, and the
+vehicle spawns. Reading packed game data out of the `.vromfs.bin` archives
+works, as does validation against the installed game.
 
-Not yet confirmed: air, naval and helicopter test drives. Their missions are
-generated and listed in game, but they also need the per-vehicle files that
-a completed Apply writes.
+One known limitation: **some aircraft cannot be applied** -- the Apply button
+stays disabled for them while others work normally. The app's own validation
+is rejecting those vehicles, which points at the bundled database describing
+them differently from the installed game. Under investigation; it affects
+individual aircraft, not air test drives as a whole.
 
 Two things remain outstanding, both documented in
 [docs/PORTING.md](docs/PORTING.md):
