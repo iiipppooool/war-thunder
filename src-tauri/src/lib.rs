@@ -529,6 +529,15 @@ pub fn run() {
             log::init(&data_dir);
             tdlog!("data dir: {}", data_dir.display());
             tdlog!("resources: {}", resource_dir.display());
+            if let Ok(m) = std::fs::read_to_string(resource_dir.join("database/manifest.json")) {
+                if let Ok(v) = serde_json::from_str::<Value>(&m) {
+                    tdlog!(
+                        "database: dbVersion {} built for game {}",
+                        v.get("dbVersion").and_then(|x| x.as_str()).unwrap_or("?"),
+                        v.get("gameVersion").and_then(|x| x.as_str()).unwrap_or("?")
+                    );
+                }
+            }
             tdlog!(
                 "blk overrides: {} (set TD3_BLK_OVERRIDES=0 to disable)",
                 std::env::var("TD3_BLK_OVERRIDES").unwrap_or_else(|_| "on".into())

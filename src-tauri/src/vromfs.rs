@@ -61,8 +61,22 @@ impl VromfCache {
             .ok()
             .and_then(|f| VromfUnpacker::from_file(&f, false).ok())
             .map(Arc::new);
-        if built.is_none() {
-            crate::tdlog!("could not open vromf {}", archive.display());
+        match &built {
+            None => crate::tdlog!("could not open vromf {}", archive.display()),
+            Some(u) => {
+                // The archive records the game build it came from. Logging it
+                // settles "is the database built for this game version?"
+                // without anyone having to find it by hand.
+                let name = archive
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                match u.latest_version() {
+                    Ok(Some(v)) => crate::tdlog!("{name}: game version {v}"),
+                    Ok(None) => crate::tdlog!("{name}: opened, no version recorded"),
+                    Err(err) => crate::tdlog!("{name}: opened, version unreadable: {err}"),
+                }
+            }
         }
         open.insert(archive.to_path_buf(), built.clone());
         built
