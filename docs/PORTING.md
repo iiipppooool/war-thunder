@@ -189,3 +189,42 @@ has to be derived from what the frontend actually requests, with the webview
 console open to catch violations -- not written from first principles and
 shipped. At minimum it needs `td3file:` in `connect-src` as well as
 `img-src` and `media-src`.
+
+## macOS will not let the app write where the game reads
+
+The largest platform difference, and the one that cost the most time.
+
+War Thunder on macOS is installed inside the Gaijin launcher's app bundle, and
+Test Drive writes to nine folders in there:
+
+    UserMissions/
+    content/pkg_local/levels/
+    content/pkg_local/gameData/flightModels/{,fm,weaponPresets}/
+    content/pkg_local/gameData/units/{tankModels,ships}/userVehicles/
+    content/pkg_local/gameData/{Weapons,weapons}/ask3lad/
+
+Since macOS 13, writing inside another application's bundle requires App
+Management permission. Without it every write fails with EPERM,
+"Operation not permitted" -- even though the folders are owned by the user and
+`touch` from Terminal succeeds, because Terminal holds the permission and the
+app does not.
+
+Granting it is not a durable fix here. macOS identifies an app for permissions
+by its code signature, and these builds are ad-hoc signed, so the grant is
+dropped on the next launch or rebuild -- the toggle appears to switch itself
+off. **A Developer ID signature is the real fix**, and it also removes the
+Gatekeeper warning. Until then `scripts/macos-setup.sh` moves both roots out
+of the bundle and symlinks them back, which avoids the permission entirely and
+survives rebuilds.
+
+Note for the code: `apply::safe_join` deliberately does not resolve symlinks,
+because requiring the resolved path to stay under the game folder would reject
+exactly that setup. Traversal is still refused by the component check.
+
+### A process note
+
+This was diagnosed one path at a time -- UserMissions, then pkg_local -- when
+one command over the frontend bundle would have listed all nine at the first
+failure. Enumerate the class before fixing an instance; the same mistake
+appeared with the updater, where fixing the bundler half left the runtime half
+broken for the identical reason.

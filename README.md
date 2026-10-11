@@ -25,6 +25,24 @@ inferred, and what to test first.
 
 Download the `.dmg` from the releases page and drag the app to Applications.
 
+### One-time setup (required)
+
+macOS will not let one app write inside another app's bundle, and War Thunder
+on macOS lives inside `/Applications/WarThunderLauncher.app`. Test Drive needs
+to write to nine folders under two roots there, so run this once:
+
+```sh
+./scripts/macos-setup.sh
+```
+
+It moves `UserMissions` and `content/pkg_local` out to
+`~/My Games/WarThunder/td3`, symlinks them back, keeps `.bak` copies of
+whatever was there, and verifies both are writable. `--undo` reverses it.
+
+Granting **App Management** in System Settings is the alternative, but macOS
+does not keep that grant for an app without a Developer ID signature, so it
+switches itself off again. See [docs/PORTING.md](docs/PORTING.md).
+
 The app is **not code-signed or notarised**, so Gatekeeper blocks it on first
 launch — the macOS equivalent of the SmartScreen warning on the Windows build.
 Either right-click the app and choose **Open**, then **Open** again, or run:
