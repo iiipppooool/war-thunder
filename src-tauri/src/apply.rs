@@ -48,6 +48,13 @@ pub enum ApplyError {
     NotGameDir(String),
     #[error("backup {0} not found")]
     NoBackup(i64),
+    /// A write that failed, naming the file. "Operation not permitted" on its
+    /// own does not say which path was refused.
+    #[error("could not write {path}: {source}")]
+    Write {
+        path: String,
+        source: std::io::Error,
+    },
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -100,10 +107,15 @@ pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, ApplyError> {
 
 fn write_file(target: &Path, contents: &str) -> Result<(), ApplyError> {
     if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent).map_err(|err| ApplyError::Write {
+            path: parent.display().to_string(),
+            source: err,
+        })?;
     }
-    std::fs::write(target, contents)?;
-    Ok(())
+    std::fs::write(target, contents).map_err(|err| ApplyError::Write {
+        path: target.display().to_string(),
+        source: err,
+    })
 }
 
 /// Apply `changes` to the game folder, returning a [`Backup`] describing how to

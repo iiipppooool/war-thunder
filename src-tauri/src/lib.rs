@@ -136,6 +136,23 @@ fn find_previews(state: State<AppState>) -> Option<String> {
 ///
 /// Paths that escape the game folder are refused (as `None`): reads stay
 /// inside the install, exactly as writes do.
+/// Copy `src` to `dest` by contents alone.
+///
+/// `std::fs::copy` uses `copyfile(COPYFILE_ALL)` on macOS, which also copies
+/// permissions, ACLs and extended attributes. Writing into an app bundle --
+/// which is where War Thunder keeps UserMissions on macOS -- can refuse those
+/// metadata operations with EPERM ("Operation not permitted") even when
+/// writing the bytes is allowed. Moving only the contents avoids that.
+fn copy_contents(src: &Path, dest: &Path) -> std::io::Result<u64> {
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let bytes = std::fs::read(src)?;
+    let len = bytes.len() as u64;
+    std::fs::write(dest, bytes)?;
+    Ok(len)
+}
+
 fn read_from_game(state: &AppState, wt_dir: &str, rel: &str) -> Option<String> {
     let root = Path::new(wt_dir);
     let target = match apply::safe_join(root, rel) {
@@ -256,7 +273,8 @@ fn install_map(app: AppHandle, wt: String, repair: bool) -> R<Vec<String>> {
         };
         let dest = dest_dir.join(&name);
         if repair || !dest.exists() {
-            std::fs::copy(entry.path(), &dest).map_err(e)?;
+            copy_contents(&entry.path(), &dest)
+                .map_err(|err| e(format!("copying {name} to {}: {err}", dest.display())))?;
             installed.push(name);
         }
     }
@@ -297,7 +315,8 @@ fn copy_background(state: State<AppState>, src: String) -> R<Option<String>> {
         let _ = std::fs::remove_file(old.path());
     }
     let dest = dir.join(format!("background.{ext}"));
-    std::fs::copy(src_path, &dest).map_err(e)?;
+    copy_contents(src_path, &dest)
+        .map_err(|err| e(format!("copying background to {}: {err}", dest.display())))?;
     Ok(Some(dest.display().to_string()))
 }
 
