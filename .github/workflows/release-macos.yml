@@ -3,13 +3,19 @@ name: Release (macOS)
 # Builds the macOS counterpart of the Windows release. Tag a commit
 # (e.g. v3.0.0-alpha.21.1) or run this manually to produce a universal .dmg.
 on:
+  # A branch push builds the app and uploads the .dmg as a run artifact.
+  # A tag push (or a manual run) additionally publishes a public release.
   push:
+    branches: ["claude/**", "main"]
     tags: ["v*"]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to publish as (e.g. v3.0.0-alpha.21.1-mac)"
-        required: true
+        description: "Publish a release under this tag (leave blank to only build)"
+        required: false
 
 permissions:
   contents: write
@@ -68,6 +74,7 @@ jobs:
           path: ${{ steps.collect.outputs.dir }}/*
 
       - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
