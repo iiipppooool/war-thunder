@@ -62,7 +62,6 @@
           "height": 400
         }
       }
-    },
-    "createUpdaterArtifacts": true
+    }
   }
 }

@@ -158,8 +158,12 @@ data.
   `xattr -dr com.apple.quarantine` workaround.
 - **Updater signing key.** `tauri-plugin-updater` is registered so the
   frontend's update button does not break, but no `plugins.updater` config is
-  set, so `check()` returns an error. Add the endpoint and a minisign public key
-  to `tauri.conf.json` to enable it; `createUpdaterArtifacts` is already on.
+  set, so `check()` returns an error. Updater artifact generation is therefore
+  off as well: `createUpdaterArtifacts` cannot be enabled without a
+  `plugins.updater` block, and turning it on without one fails the bundler with
+  `plugins > updater doesn't exist`. To enable updates, add both at once -- a
+  `plugins.updater` section with your endpoint and minisign public key, and
+  `"createUpdaterArtifacts": true`.
 - **Icon resolution.** The Windows executable only carries 16/32/48 px icons, so
   the macOS icon is upscaled from 48 px and will look soft on a Retina display.
   Drop a 1024×1024 master at `src-tauri/icons/icon.png` and re-run
