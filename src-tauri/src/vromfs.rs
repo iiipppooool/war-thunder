@@ -95,7 +95,9 @@ impl VromfCache {
                 }
             }
         }
-        eprintln!("[testdrive3] not found in any vromf: {rel}");
+        // Only reached for genuine game-data paths now, so this means a
+        // real lookup miss rather than a file the app has yet to create.
+        eprintln!("[testdrive3] not in any vromf: {rel}");
         None
     }
 }

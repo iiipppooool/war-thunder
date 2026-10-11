@@ -153,6 +153,19 @@ fn copy_contents(src: &Path, dest: &Path) -> std::io::Result<u64> {
     Ok(len)
 }
 
+/// Paths that only ever exist as loose files, never inside a vromf.
+///
+/// `content/pkg_local` is the local overlay the app writes into, and
+/// `UserMissions` holds the missions it generates. Neither is shipped inside
+/// an archive, so searching the archives for them is guaranteed to miss --
+/// and each miss decodes every archive's inner container. Applying an air
+/// test drive asks about ~25 such files, which turned into ~25 pointless
+/// full-archive scans.
+fn is_loose_only(rel: &str) -> bool {
+    let lower = rel.to_lowercase();
+    lower.starts_with("content/") || lower.starts_with("usermissions/")
+}
+
 fn read_from_game(state: &AppState, wt_dir: &str, rel: &str) -> Option<String> {
     let root = Path::new(wt_dir);
     let target = match apply::safe_join(root, rel) {
@@ -162,10 +175,14 @@ fn read_from_game(state: &AppState, wt_dir: &str, rel: &str) -> Option<String> {
             return None;
         }
     };
-    // Loose file first (mods and user content), then the packed archives,
-    // which is where the shipped game data actually lives.
+    // Loose file first: mods, user content, and anything the app wrote.
     if let Ok(text) = std::fs::read_to_string(&target) {
         return Some(text);
+    }
+    // Only shipped game data lives in the archives. For the app's own output
+    // paths, "absent" is the correct answer and needs no archive search.
+    if is_loose_only(rel) {
+        return None;
     }
     state.vromfs.read(root, rel)
 }
@@ -627,6 +644,24 @@ mod tests {
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         p
+    }
+
+    #[test]
+    fn app_output_paths_skip_the_archive_search() {
+        // The app's own overlay and mission output: never in an archive.
+        assert!(is_loose_only(
+            "content/pkg_local/gameData/flightModels/fm/x.blk"
+        ));
+        assert!(is_loose_only(
+            "content/pkg_local/gameData/Weapons/rocketGuns/ask3lad/y.blk"
+        ));
+        assert!(is_loose_only("UserMissions/Ask3lad/ask3lad_testdrive.blk"));
+        assert!(is_loose_only("usermissions/ask3lad/z.blk"));
+        // Shipped game data: must still be looked up in the archives.
+        assert!(!is_loose_only("gamedata/flightmodels/fm/p51.blk"));
+        assert!(!is_loose_only(
+            "gameData/Weapons/groundModels_weapons/cannon.blk"
+        ));
     }
 
     #[test]
