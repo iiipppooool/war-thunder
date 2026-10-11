@@ -27,7 +27,11 @@ use tauri::{AppHandle, Manager, State};
 type R<T> = Result<T, String>;
 
 fn e<E: std::fmt::Display>(err: E) -> String {
-    err.to_string()
+    // Surface the failure on stderr too: the webview may swallow a rejected
+    // command, leaving a blank screen with no visible cause.
+    let msg = err.to_string();
+    eprintln!("[testdrive3] command error: {msg}");
+    msg
 }
 
 pub struct AppState {
@@ -116,34 +120,48 @@ fn find_previews(state: State<AppState>) -> Option<String> {
 
 // ------------------------------------------------------------- game file read
 
-fn read_from_game(wt_dir: &str, rel: &str) -> R<Option<String>> {
+/// Read one game file, or `None` when it is missing or unreadable.
+///
+/// The frontend's contract is `string | null` per path, so an unreadable path
+/// must yield `None` rather than failing the call. Returning an error here
+/// rejected the whole batch in [`read_game_files`], and a single odd path --
+/// one naming a file inside a vromfs archive, say -- took the entire read
+/// down with it, leaving the UI with a rejected promise and a blank screen.
+///
+/// Paths that escape the game folder are refused (as `None`): reads stay
+/// inside the install, exactly as writes do.
+fn read_from_game(wt_dir: &str, rel: &str) -> Option<String> {
     let root = Path::new(wt_dir);
-    let target = apply::safe_join(root, rel).map_err(e)?;
-    Ok(std::fs::read_to_string(target).ok())
+    let target = match apply::safe_join(root, rel) {
+        Ok(t) => t,
+        Err(err) => {
+            eprintln!("[testdrive3] refusing to read {rel:?}: {err}");
+            return None;
+        }
+    };
+    std::fs::read_to_string(target).ok()
 }
 
 #[tauri::command]
-fn read_game_file(wt: String, path: String) -> R<Option<String>> {
+fn read_game_file(wt: String, path: String) -> Option<String> {
     read_from_game(&wt, &path)
 }
 
 #[tauri::command]
-fn read_game_files(wt: String, paths: Vec<String>) -> R<Vec<Option<String>>> {
+fn read_game_files(wt: String, paths: Vec<String>) -> Vec<Option<String>> {
+    // One unreadable path yields one null, never a failed batch.
     paths.iter().map(|p| read_from_game(&wt, p)).collect()
 }
 
 /// Flight model for a given aircraft id, from `gamedata/flightmodels`.
 #[tauri::command]
-fn read_flight_model(wt: String, id: String) -> R<Option<String>> {
-    for rel in [
+fn read_flight_model(wt: String, id: String) -> Option<String> {
+    [
         format!("gamedata/flightmodels/fm/{id}.blk"),
         format!("gamedata/flightmodels/{id}.blk"),
-    ] {
-        if let Some(text) = read_from_game(&wt, &rel)? {
-            return Ok(Some(text));
-        }
-    }
-    Ok(None)
+    ]
+    .iter()
+    .find_map(|rel| read_from_game(&wt, rel))
 }
 
 // ------------------------------------------------------------ apply / backups

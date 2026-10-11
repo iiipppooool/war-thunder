@@ -76,8 +76,12 @@ pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, ApplyError> {
     for part in Path::new(&rel).components() {
         match part {
             Component::Normal(p) => out.push(p),
-            // Everything else (RootDir, Prefix, ParentDir, CurDir) is refused
-            // rather than normalised away, so no input can climb out.
+            // `.` is a harmless no-op, and the frontend does emit paths like
+            // `./missions/ask3lad_testdrive.blk`. Skip it rather than treating
+            // it as an escape attempt.
+            Component::CurDir => {}
+            // RootDir, Prefix and ParentDir are refused rather than normalised
+            // away, so no input can climb out of the game folder.
             _ => return Err(esc()),
         }
     }
@@ -226,6 +230,24 @@ mod tests {
         ] {
             assert!(safe_join(root, bad).is_err(), "should reject {bad:?}");
         }
+    }
+
+    /// The frontend emits `./`-prefixed paths. These are safe and must work --
+    /// rejecting them broke every per-vehicle game-file read.
+    #[test]
+    fn accepts_dot_slash_prefixed_paths() {
+        let root = Path::new("/game");
+        assert_eq!(
+            safe_join(root, "./missions/ask3lad_testdrive.blk").unwrap(),
+            root.join("missions/ask3lad_testdrive.blk")
+        );
+        assert_eq!(
+            safe_join(root, "./UserMissions/./a.blk").unwrap(),
+            root.join("UserMissions/a.blk")
+        );
+        // ...but a `.` must not smuggle a `..` past the check.
+        assert!(safe_join(root, "./../evil.blk").is_err());
+        assert!(safe_join(root, "./UserMissions/../../evil.blk").is_err());
     }
 
     #[test]
